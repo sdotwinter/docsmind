@@ -64,13 +64,17 @@ export async function handlePullRequest(
     pull_number: pull_request.number,
   });
   
-  // Filter to markdown files only
+  // Analyze all files (not just markdown) - but prioritize docs
   const mdFiles = files.filter(f => 
     f.filename.endsWith('.md') || f.filename.endsWith('.mdx')
+  );
+  const codeFiles = files.filter(f => 
+    !f.filename.endsWith('.md') && !f.filename.endsWith('.mdx')
   );
   
   const allFindings: ReviewFinding[] = [];
   const changes: SemanticDiff['sections'] = [];
+  const diffContent: string[] = []; // Store raw diff for AI
   
   let docType: DocTypeClassification | null = null;
   
@@ -140,10 +144,66 @@ export async function handlePullRequest(
     const diff = computeSemanticDiff(oldDoc, newDoc);
     changes.push(...diff.sections);
     
+    // Add diff content to findings (show key changes)
+    if (file.patch) {
+      const lines = file.patch.split('\n').slice(0, 10);
+      allFindings.push({
+        type: 'info',
+        category: 'diff',
+        message: `\`\`\`\n${lines.join('\n')}\n\`\`\``,
+        file: file.filename,
+      });
+    }
+    
     // Generate findings
     const fileFindings = analyzeChanges(file.filename, diff, oldDoc, newDoc);
     allFindings.push(...fileFindings);
   }
+  
+  // Analyze code files (non-markdown)
+  if (codeFiles.length > 0) {
+    allFindings.push({
+      type: 'info',
+      category: 'content',
+      message: `Code changes: ${codeFiles.length} file(s) modified`,
+    });
+    
+    for (const file of codeFiles) {
+      const linesAdded = file.additions || 0;
+      const linesRemoved = file.deletions || 0;
+      
+      allFindings.push({
+        type: 'info',
+        category: 'code',
+        message: `${file.filename}: +${linesAdded} -${linesRemoved}`,
+      });
+      
+      // Store diff snippet for AI
+      if (file.patch) {
+        diffContent.push(`\n${file.filename}:\n${file.patch.slice(0, 1500)}`);
+        
+        // Add first few lines of diff to findings
+        const diffLines = file.patch.split('\n').slice(0, 8);
+        allFindings.push({
+          type: 'info',
+          category: 'diff',
+          message: `\`\`\`\n${diffLines.join('\n')}\n\`\`\``,
+          file: file.filename,
+        });
+      }
+    }
+  }
+      }
+    }
+  }
+  
+  // Get code files info for AI
+  const codeFilesInfo = codeFiles.map(f => ({
+    filename: f.filename,
+    additions: f.additions || 0,
+    deletions: f.deletions || 0,
+    patch: f.patch,
+  }));
   
   // Build review result
   const semanticDiff: SemanticDiff = {
@@ -170,6 +230,7 @@ export async function handlePullRequest(
   
   // Generate AI summary if API key is configured
   let aiSummary = '';
+  let prDescription = '';
   if (process.env.MINIMAX_API_KEY && process.env.MINIMAX_GROUP_ID) {
     try {
       aiSummary = await generateAISummary(
@@ -179,7 +240,21 @@ export async function handlePullRequest(
         {
           apiKey: process.env.MINIMAX_API_KEY,
           groupId: process.env.MINIMAX_GROUP_ID,
-        }
+        },
+        codeFilesInfo
+      );
+      
+      // Generate PR description
+      const { generatePRDescription } = await import('../lib/ai');
+      prDescription = await generatePRDescription(
+        docType || { type: 'other', confidence: 0, indicators: [] },
+        semanticDiff,
+        allFindings,
+        {
+          apiKey: process.env.MINIMAX_API_KEY,
+          groupId: process.env.MINIMAX_GROUP_ID,
+        },
+        codeFilesInfo
       );
     } catch (e) {
       console.error('AI summary error:', e);
@@ -193,6 +268,7 @@ export async function handlePullRequest(
     findings: allFindings,
     summary,
     aiSummary,
+    prDescription,
   });
   
   return {
@@ -204,6 +280,7 @@ export async function handlePullRequest(
     findings: allFindings,
     summary,
     aiSummary,
+    prDescription,
   };
 }
 
@@ -276,9 +353,25 @@ async function postReviewResults(
     findings: ReviewFinding[];
     summary: string;
     aiSummary?: string;
+    prDescription?: string;
   }
 ) {
-  const { docType, semanticDiff, findings, summary, aiSummary } = result;
+  const { docType, semanticDiff, findings, summary, aiSummary, prDescription } = result;
+  
+  // Update PR description if we have one
+  if (prDescription && !pullRequest.body) {
+    try {
+      await github.octokit.pulls.update({
+        owner: repository.owner.login,
+        repo: repository.name,
+        pull_number: pullRequest.number,
+        body: prDescription,
+      });
+      console.log(`Updated PR #${pullRequest.number} description`);
+    } catch (err) {
+      console.error('Failed to update PR description:', err);
+    }
+  }
   
   // Create check run
   const checkBody: CheckRunConclusion = {

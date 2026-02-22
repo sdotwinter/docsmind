@@ -129,6 +129,7 @@ export interface ReviewResult {
   findings: ReviewFinding[];
   summary: string;
   aiSummary?: string;
+  prDescription?: string;
 }
 
 // Check run payload
