@@ -1,9 +1,9 @@
 import { Octokit } from '@octokit/rest';
 import { createAppAuth } from '@octokit/auth-app';
-import { ReviewResult, CheckRunConclusion, WebhookPayload, DocDocument, SemanticDiff, DocTypeClassification, ReviewFinding } from '../types';
-import { parseMarkdown } from './markdown';
-import { computeSemanticDiff, generateDiffSummary } from './diff';
-import { classifyDocument, generateReviewChecklist } from './classifier';
+import { ReviewResult, CheckRunConclusion, WebhookPayload, DocDocument, SemanticDiff, DocTypeClassification, ReviewFinding, DocSection } from '../types';
+import { parseMarkdown } from '../lib/markdown';
+import { computeSemanticDiff, generateDiffSummary } from '../lib/diff';
+import { classifyDocument, generateReviewChecklist } from '../lib/classifier';
 
 interface GitHubClient {
   octokit: Octokit;
