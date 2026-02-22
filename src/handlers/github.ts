@@ -193,9 +193,6 @@ export async function handlePullRequest(
       }
     }
   }
-      }
-    }
-  }
   
   // Get code files info for AI
   const codeFilesInfo = codeFiles.map(f => ({
