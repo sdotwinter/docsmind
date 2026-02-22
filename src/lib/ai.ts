@@ -31,27 +31,19 @@ export async function generateAISummary(
   const stats = diff.stats;
   const hasCode = codeFiles && codeFiles.length > 0;
   
-  // Build the prompt based on what's changed
+  // Simple prompt
   let prompt = '';
   
   if (hasCode) {
-    // Code + docs PR
     const codeSummary = codeFiles
-      .map(f => `${f.filename}: +${f.additions} -${f.deletions}`)
-      .slice(0, 5)
+      .slice(0, 3)
+      .map(f => f.filename)
       .join(', ');
-    
-    prompt = `PR summary (1 sentence, 15 words max): Code changed: ${codeSummary}.`;
+    prompt = `${codeSummary} changed.`;
   } else if (docType.type !== 'other') {
-    // Docs only PR
-    prompt = `PR summary (1 sentence, 15 words max): Docs: ${docType.type} +${stats.added} -${stats.removed} sections.`;
+    prompt = `Updated ${docType.type} docs.`;
   } else {
-    // Other/unknown
-    prompt = `Summarize these changes in ONE short sentence (max 15 words):
-- Files changed: ${stats.added + stats.removed + stats.modified}
-- Changes: +${stats.added} added, -${stats.removed} removed, ~${stats.modified} modified
-
-Keep it brief and helpful.`;
+    prompt = `Updated ${stats.added + stats.modified} lines.`;
   }
 
   try {
@@ -66,7 +58,7 @@ Keep it brief and helpful.`;
         messages: [{ role: 'user', content: prompt }],
         groupId: groupId,
         temperature: 0.3,
-        max_tokens: 60,
+        max_tokens: 30,
       }),
     });
     
@@ -100,33 +92,15 @@ export async function generatePRDescription(
   const stats = diff.stats;
   const hasCode = codeFiles && codeFiles.length > 0;
   
+  // Simple prompt
   let prompt = '';
   
   if (hasCode) {
-    const codeSummary = codeFiles
-      .map(f => `${f.filename}: +${f.additions} -${f.deletions}`)
-      .slice(0, 8)
-      .join('\n');
-    
-    prompt = `Write a helpful PR description (2-3 short sentences):
-
-## Changes
-${codeSummary}
-${stats.added + stats.removed > 0 ? `\n## Documentation\n+${stats.added} -${stats.removed} sections modified` : ''}
-
-## Summary
-Write what this PR does and why. Be concise.`;
+    prompt = `This PR updates ${codeFiles?.length || 0} files.`;
   } else if (docType.type !== 'other') {
-    prompt = `Write a helpful PR description for these documentation changes (2-3 short sentences):
-- Type: ${docType.type}
-- Changes: +${stats.added} added, -${stats.removed} removed, ~${stats.modified} modified
-
-Focus on what changed and why it matters.`;
+    prompt = `This PR updates the ${docType.type} documentation.`;
   } else {
-    prompt = `Write a helpful PR description (2-3 short sentences) for this PR:
-- Changes: +${stats.added} added, -${stats.removed} removed, ~${stats.modified} modified
-
-Keep it brief and informative.`;
+    prompt = `This PR makes changes to ${stats.added + stats.modified} lines.`;
   }
 
   try {
@@ -141,7 +115,7 @@ Keep it brief and informative.`;
         messages: [{ role: 'user', content: prompt }],
         groupId: groupId,
         temperature: 0.5,
-        max_tokens: 150,
+        max_tokens: 60,
       }),
     });
     
