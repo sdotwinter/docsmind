@@ -1,66 +1,84 @@
-# DiffShield - AI Documentation Review for GitHub
+# DiffShield - AI-Powered Documentation Review
 
-AI-powered Markdown documentation review for GitHub PRs.
+Automated PR reviews for your documentation. Get instant feedback on markdown changes.
 
-## Setup
-
-1. Create a GitHub App:
-   - Go to https://github.com/settings/apps/new
-   - Set Webhook URL to your deployed URL
-   - Set Webhook secret (generate a random string)
-   - Subscribe to "Pull request" events
-   - Required permissions:
-     - Repository contents (read)
-     - Pull requests (read/write)
-     - Issues (read/write)
-     - Checks (read/write)
-   - Note the App ID and generate a private key
-
-2. Configure environment:
-   ```bash
-   cp .env.example .env
-   # Edit .env with your credentials
-   ```
-
-3. Install and run:
-   ```bash
-   npm install
-   npm run build
-   npm start
-   ```
-
-## Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| GITHUB_APP_ID | GitHub App ID |
-| GITHUB_PRIVATE_KEY | Private key (paste as single line, use \n for newlines) |
-| GITHUB_WEBHOOK_SECRET | Webhook secret |
-| GITHUB_CLIENT_ID | OAuth client ID |
-| GITHUB_CLIENT_SECRET | OAuth client secret |
-| PORT | Server port (default: 3000) |
-
-## Deployment
-
-### Render / Fly.io
-```bash
-# Build for production
-npm run build
-```
-
-### Render
-- Set build command: `npm run build`
-- Set start command: `npm start`
-- Add all environment variables
+![DiffShield](https://diffshield.onrender.com)
 
 ## Features
 
-- **Semantic Diff**: Understands document structure, not just text
-- **Doc Type Classification**: Identifies SOPs, ADRs, runbooks, pricing docs
-- **Smart Review Checklist**: Generates relevant review items based on doc type
-- **GitHub Checks**: Posts results as GitHub Check Runs
-- **PR Comments**: Adds detailed review comment
+- **Semantic Diff** - Understands document structure, not just text changes
+- **Smart Classification** - Identifies doc types: README, SOP, ADR, Runbook, Pricing, API, Contributing
+- **Contextual Checklists** - Review items based on document type
+- **Link Validation** - Catches broken internal links
+- **GitHub Integration** - Checks + Comments on every PR
 
-## License
+## Quick Start
 
-MIT
+### 1. Install DiffShield
+
+[Install DiffShield on GitHub →](https://github.com/apps/diffshield)
+
+Select the repositories you want to protect.
+
+### 2. Create a PR
+
+Make changes to any `.md` file and open a PR. DiffShield will automatically:
+
+- Analyze the changes
+- Classify the document type
+- Generate a review checklist
+- Post results as a GitHub Check + Comment
+
+## Documentation Types Detected
+
+| Type | Detected By |
+|------|--------------|
+| README | Installation, setup, usage sections |
+| SOP | Steps, procedures, prerequisites |
+| ADR | Architecture decisions, status, context |
+| Runbook | Incident, alert, troubleshooting |
+| Pricing | Tables, tiers, costs |
+| API | Endpoints, authentication |
+| Contributing | PR guidelines, development setup |
+
+## Example Review
+
+```
+📄 DiffShield Review
+
+Document Type: README (85% confidence)
+
+Changes Summary
++3 sections, -1 removed, 2 modified
+
+Findings
+✅ Verify installation steps work
+✅ Check API examples are correct  
+✅ Review 3 new section(s)
+⚠️ Verify 1 removed section(s) are intentional
+```
+
+## Configuration
+
+DiffShield works out of the box. No configuration required.
+
+## Privacy
+
+DiffShield only reads:
+- Markdown files in PRs
+- Repository metadata
+
+Your code and data are never accessed.
+
+## Support
+
+- [Report Issues →](https://github.com/sdotwinter/diffshield/issues)
+- [Request Features →](https://github.com/sdotwinter/diffshield/discussions)
+
+## Pricing
+
+Free for open source. Commercial pricing coming soon.
+
+---
+
+Built with ❤️ by [Sean](https://github.com/sdotwinter)
