@@ -16,10 +16,10 @@ const DOC_TYPE_PATTERNS = {
     { pattern: /alternatives|considered|options/i, weight: 1.5 },
   ],
   readme: [
-    { pattern: /^#?\s*README/i, weight: 3 },
-    { pattern: /installation|setup|getting\s+started|quick\s+start/i, weight: 1.5 },
-    { pattern: /usage|example|api|license|contributing/i, weight: 1 },
-    { pattern: /badge|version|build|test/i, weight: 1 },
+    { pattern: /^#?\s*README/i, weight: 4 },
+    { pattern: /installation|setup|getting\s+started|quick\s+start/i, weight: 2 },
+    { pattern: /usage|example|api\s+reference|license|contributing/i, weight: 1.5 },
+    { pattern: /badge|version|build|test|features?/i, weight: 1 },
   ],
   runbook: [
     { pattern: /runbook|playbook|run\s+book|operations?\s+manual/i, weight: 3 },
@@ -29,11 +29,10 @@ const DOC_TYPE_PATTERNS = {
     { pattern: /debug|troubleshoot|investigation/i, weight: 1.5 },
   ],
   pricing: [
-    { pattern: /pricing|price|plan|tier|cost|fee|subscription|billing/i, weight: 3 },
-    { pattern: /per\s+user|per\s+month|per\s+seat|enterprise|free\s+trial/i, weight: 2 },
-    { pattern: /\$\d+|USD|EUR|GBP|annual|monthly/i, weight: 1.5 },
-    { pattern: /feature\s+matrix|comparison|table/i, weight: 2 },
-    { pattern: /limit|quota|cap|overage/i, weight: 1.5 },
+    { pattern: /^#?\s*(pricing|plans?|cost|tier)/i, weight: 3 },
+    { pattern: /\$\d+|USD|EUR|GBP|per\s+(month|user|seat|year)|annual|billing|invoice/i, weight: 2 },
+    { pattern: /feature\s+matrix|comparison\s+table/i, weight: 2 },
+    { pattern: /subscription|fee|charge/i, weight: 1.5 },
   ],
   changelog: [
     { pattern: /changelog|change\s+log|release\s+notes|history/i, weight: 3 },
