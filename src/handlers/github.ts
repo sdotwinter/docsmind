@@ -12,9 +12,17 @@ interface GitHubClient {
 
 export async function createGitHubClient(payload: WebhookPayload): Promise<GitHubClient> {
   // This would use the GitHub App's private key
-  // For now, we'll use a placeholder
   const appId = process.env.GITHUB_APP_ID || '';
-  const privateKey = process.env.GITHUB_PRIVATE_KEY || '';
+  let privateKey = process.env.GITHUB_PRIVATE_KEY || '';
+  
+  // If using private key file path
+  if (!privateKey && process.env.GITHUB_PRIVATE_KEY_PATH) {
+    try {
+      privateKey = require('fs').readFileSync(process.env.GITHUB_PRIVATE_KEY_PATH, 'utf-8');
+    } catch (e) {
+      console.error('Failed to read private key file:', e);
+    }
+  }
   
   const auth = createAppAuth({
     appId,
