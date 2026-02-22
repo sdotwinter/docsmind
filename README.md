@@ -1,5 +1,15 @@
 # DiffShield - AI-Powered Documentation Review
 
+## New Feature
+
+This is a test feature that was added.
+
+### Steps
+
+1. First step
+2. Second step
+3. Third step
+
 Automated PR reviews for your documentation. Get instant feedback on markdown changes.
 
 ![DiffShield](https://diffshield.onrender.com)
