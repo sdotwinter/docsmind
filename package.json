@@ -1,5 +1,5 @@
 {
-  "name": "docsmind",
+  "name": "diffshield",
   "version": "1.0.0",
   "description": "AI-powered Markdown documentation review for GitHub PRs",
   "main": "dist/index.js",
