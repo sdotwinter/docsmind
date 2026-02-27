@@ -8,9 +8,9 @@ Automated PR reviews for your documentation. Get instant feedback on markdown ch
 
 - **Semantic Diff** - Understands document structure, not just text changes
 - **Smart Classification** - Identifies doc types: README, SOP, ADR, Runbook, Pricing, API, Contributing
-- **Contextual Checklists** - Review items based on document type
+- **Contextual Checklists** - Review items based on document type and PR intent
 - **Link Validation** - Catches broken internal links
-- **GitHub Integration** - Checks + Comments on every PR
+- **GitHub Integration** - Checks + comments with verdict and confidence on every PR
 
 ## Quick Start
 
@@ -57,6 +57,16 @@ Findings
 ✅ Review 3 new section(s)
 ⚠️ Verify 1 removed section(s) are intentional
 ```
+
+
+## Reviewer Experience Goals
+
+DiffShield comments should help reviewers decide quickly:
+
+- Surface PR intent in plain language
+- Highlight only high-impact risks with evidence
+- Provide clear, actionable checklist items
+- Keep output concise and decision-oriented
 
 ## Configuration
 

@@ -196,13 +196,25 @@ function parseV2Response(aiResponse: string): V2ReviewOutput | null {
       return null;
     }
     
-    // Validate confidence is a number between 0 and 1
-    const confidence = parsed.verdict.confidence ?? 0.5;
-    if (typeof confidence !== 'number' || confidence < 0 || confidence > 1) {
-      console.error('Invalid confidence:', confidence);
+    // V3: Validate confidence is a number between 0 and 1
+    const rawConfidence = parsed.verdict.confidence ?? 0.5;
+    if (typeof rawConfidence !== 'number' || rawConfidence < 0 || rawConfidence > 1) {
+      console.error('Invalid confidence:', rawConfidence);
       return null;
     }
+
+    // V3: Calibrate confidence - cap at 0.85 unless evidence is strong
+    const errors = parsed.keyRisks?.filter((r: RiskItem) => r.severity === 'high') || [];
+    const hasConsistentFindings = errors.length > 0;
+    const calibratedConfidence = hasConsistentFindings && rawConfidence > 0.85
+      ? Math.min(rawConfidence, 0.92)  // Cap at 0.92 for strong evidence
+      : Math.min(rawConfidence, 0.82); // Cap at 0.82 for docs-only/mild cases
     
+    const normalizedConfidence = Math.max(0, Math.min(1, calibratedConfidence));
+    const finalConfidence = verdict === 'approved'
+      ? Math.min(normalizedConfidence, 0.82)
+      : normalizedConfidence;
+
     return {
       prIntent: parsed.prIntent,
       changeOverview: parsed.changeOverview,
@@ -214,7 +226,7 @@ function parseV2Response(aiResponse: string): V2ReviewOutput | null {
       },
       verdict: {
         verdict,
-        confidence: Math.max(0, Math.min(1, confidence)),
+        confidence: finalConfidence,
         summary: parsed.verdict.summary || '',
       },
     };
@@ -300,29 +312,54 @@ export function generateDeterministicFallback(
   prContext: PRContext,
   docType: DocTypeClassification,
   semanticDiff: SemanticDiff,
-  findings: ReviewFinding[]
+  findings: ReviewFinding[],
+  codeFiles?: CodeFileInfo[]
 ): V2ReviewOutput {
   const errors = findings.filter(f => f.type === 'error');
   const warnings = findings.filter(f => f.type === 'warning');
   
   // Determine verdict based on findings
   let verdict: V2Verdict['verdict'] = 'approved';
-  let confidence = 0.9;
+  let rawConfidence = 0.9;
   let verdictSummary = 'No critical issues detected in documentation changes.';
   
   if (errors.length > 0) {
     verdict = 'changes_requested';
-    confidence = 0.95;
+    rawConfidence = 0.95;
     verdictSummary = `${errors.length} error(s) must be addressed before merging.`;
   } else if (warnings.length > 3) {
     verdict = 'commented';
-    confidence = 0.7;
+    rawConfidence = 0.7;
     verdictSummary = `${warnings.length} warnings should be reviewed.`;
   } else if (warnings.length > 0) {
     verdict = 'approved';
-    confidence = 0.8;
+    rawConfidence = 0.8;
     verdictSummary = `${warnings.length} warning(s) noted but not blocking.`;
   }
+  
+  // V3: Calibrate confidence based on evidence quality
+  // For docs-only + mild warnings, keep confidence moderate (0.65-0.82)
+  const isDocsOnly = codeFiles && codeFiles.length === 0;
+  const hasMildWarnings = warnings.length > 0 && errors.length === 0;
+  let calibratedConfidence = rawConfidence;
+  
+  if (isDocsOnly && hasMildWarnings) {
+    // Docs-only with mild warnings: cap at 0.75
+    calibratedConfidence = Math.min(rawConfidence, 0.75);
+  } else if (hasMildWarnings) {
+    // Mild warnings without errors: cap at 0.82
+    calibratedConfidence = Math.min(rawConfidence, 0.82);
+  } else if (errors.length > 0) {
+    // Has errors - still cap at 0.92, not 1.0
+    calibratedConfidence = Math.min(rawConfidence, 0.92);
+  }
+  
+  // Update verdict with calibrated confidence
+  const finalVerdict = {
+    verdict,
+    confidence: verdict === 'approved' ? Math.min(calibratedConfidence, 0.82) : calibratedConfidence,
+    summary: verdictSummary,
+  };
   
   // Generate key risks from errors and warnings
   const keyRisks: RiskItem[] = [];
@@ -395,11 +432,7 @@ export function generateDeterministicFallback(
     keyRisks,
     checklist: checklist.slice(0, 8),
     prBodySuggestion: { sections: [] },
-    verdict: {
-      verdict,
-      confidence,
-      summary: verdictSummary,
-    },
+    verdict: finalVerdict,
   };
 }
 

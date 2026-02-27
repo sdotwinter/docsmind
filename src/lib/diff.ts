@@ -81,6 +81,42 @@ export function computeSemanticDiff(oldDoc: DocDocument, newDoc: DocDocument): S
   return { sections: changes, stats };
 }
 
+/**
+ * V3: Check if section removals are likely due to move/reorder
+ * Returns true if the removal should be downgraded from warning to info
+ */
+export function isLikelyMoveOrReorder(
+  removedSections: SectionChange[],
+  addedSections: SectionChange[],
+  movedSections: SectionChange[]
+): boolean {
+  // If moved count is high, likely reorganization
+  if (movedSections.length >= 2) {
+    return true;
+  }
+  
+  // Check for removed+added pairs with similar content (implicit moves)
+  let similarPairs = 0;
+  for (const removed of removedSections) {
+    for (const added of addedSections) {
+      // Check similarity by comparing headings (simple heuristic)
+      const removedHeading = removed.oldHeading?.toLowerCase() || '';
+      const addedHeading = added.newHeading?.toLowerCase() || '';
+      
+      // Similar heading suggests move/rename
+      if (removedHeading && addedHeading) {
+        const similarity = computeSimilarity(removedHeading, addedHeading);
+        if (similarity > 0.6) {
+          similarPairs++;
+        }
+      }
+    }
+  }
+  
+  // If multiple similar pairs, likely reorganization
+  return similarPairs >= 2;
+}
+
 function findMovedSection(
   section: DocSection,
   otherSections: Map<string, DocSection>
