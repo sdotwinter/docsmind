@@ -436,6 +436,22 @@ async function postReviewResults(
       conclusion = 'success';
     }
   }
+
+  // Guardrail: avoid failing checks for low-risk/doc-only feedback.
+  const hasErrorFindings = findings.some(f => f.type === 'error');
+  const hasHighRisk = (v2Review?.keyRisks || []).some(r => r.severity === 'high');
+  if (verdict === 'changes_requested' && !hasErrorFindings && !hasHighRisk) {
+    verdict = 'commented';
+    conclusion = 'neutral';
+
+    if (v2Review?.verdict) {
+      v2Review.verdict = {
+        ...v2Review.verdict,
+        verdict: 'commented',
+        summary: 'Non-blocking review feedback only; no high-severity issues detected.',
+      };
+    }
+  }
   
   // Update PR description if we have one (but don't post as comment)
   if (prDescription && !pullRequest.body) {
