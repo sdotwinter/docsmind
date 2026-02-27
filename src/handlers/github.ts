@@ -2,7 +2,7 @@ import { Octokit } from '@octokit/rest';
 import { createAppAuth } from '@octokit/auth-app';
 import { ReviewResult, CheckRunConclusion, WebhookPayload, DocDocument, SemanticDiff, DocTypeClassification, ReviewFinding, DocSection, PRContext, V2ReviewOutput } from '../types';
 import { parseMarkdown } from '../lib/markdown';
-import { computeSemanticDiff, generateDiffSummary } from '../lib/diff';
+import { computeSemanticDiff, generateDiffSummary, isLikelyMoveOrReorder } from '../lib/diff';
 import { classifyDocument, generateReviewChecklist, validateLinks } from '../lib/classifier';
 import { generateAISummary, generateV2Review, generateV2PRDescription, generateDeterministicFallback } from '../lib/ai';
 
@@ -275,7 +275,8 @@ export async function handlePullRequest(
           prContext,
           docType || { type: 'other', confidence: 0, indicators: [] },
           semanticDiff,
-          allFindings
+          allFindings,
+          codeFilesInfo
         );
         aiSummary = v2Review.changeOverview;
         prDescription = '';
@@ -287,7 +288,8 @@ export async function handlePullRequest(
         prContext,
         docType || { type: 'other', confidence: 0, indicators: [] },
         semanticDiff,
-        allFindings
+        allFindings,
+        codeFilesInfo
       );
       aiSummary = v2Review.changeOverview;
       prDescription = '';
@@ -355,13 +357,21 @@ function analyzeChanges(
   const linkFindings = validateLinks(newDoc);
   const findings = linkFindings.map(f => ({ ...f, file: filename }));
   
-  // Also check for section removals
-  const removed = diff.sections.filter(s => s.type === 'removed');
-  if (removed.length > 0) {
+  // V3: Check if section removals are likely due to move/reorder
+  const removedSections = diff.sections.filter(s => s.type === 'removed');
+  const addedSections = diff.sections.filter(s => s.type === 'added');
+  const movedSections = diff.sections.filter(s => s.type === 'moved');
+  const likelyMoveReorder = isLikelyMoveOrReorder(removedSections, addedSections, movedSections);
+  
+  // Check for section removals - downgrade to info if likely move/reorder
+  if (removedSections.length > 0) {
     findings.push({
-      type: 'warning',
+      // V3: Downgrade from warning to info if likely move/reorder
+      type: likelyMoveReorder ? 'info' : 'warning',
       category: 'content',
-      message: `${removed.length} section(s) removed - ensure this is intentional`,
+      message: likelyMoveReorder
+        ? `${removedSections.length} section(s) appear to be reorganized (moved/renamed)`
+        : `${removedSections.length} section(s) removed - ensure this is intentional`,
       file: filename,
     });
   }
@@ -515,6 +525,7 @@ function generateCheckSummary(findings: ReviewFinding[], docType: DocTypeClassif
 
 /**
  * Generate v2 PR comment with structured sections
+ * V3: Added verdict-label consistency and deduplication
  */
 function generateV2PRComment(
   docType: DocTypeClassification,
@@ -524,7 +535,7 @@ function generateV2PRComment(
 ): string {
   const { prIntent, changeOverview, keyRisks, checklist, verdict, prBodySuggestion } = v2Review;
   
-  // Verdict emoji and label
+  // V3: Verdict emoji and label
   const verdictEmoji = verdict.verdict === 'approved' ? '✅' : verdict.verdict === 'changes_requested' ? '❌' : '💬';
   const verdictLabel = verdict.verdict === 'approved' ? 'APPROVED' : verdict.verdict === 'changes_requested' ? 'CHANGES REQUESTED' : 'COMMENTED';
   
@@ -542,10 +553,19 @@ function generateV2PRComment(
   comment += `${changeOverview}\n\n`;
   comment += `**Diff Stats:** +${semanticDiff.stats.added} added, -${semanticDiff.stats.removed} removed, ~${semanticDiff.stats.modified} modified, »${semanticDiff.stats.moved} moved\n\n`;
   
-  // Key Risks (top 3-5)
+  // V3: Key Risks - deduplicate by not including items that are already covered in findings
+  // Build a set of finding messages to avoid duplication
+  const findingMessages = new Set(findings.map(f => f.message.toLowerCase()));
+  
   if (keyRisks.length > 0) {
     comment += `### ⚠️ Key Risks\n`;
     for (const risk of keyRisks.slice(0, 5)) {
+      // Skip if this risk is already covered by findings
+      const riskDescLower = risk.description.toLowerCase();
+      if (findingMessages.has(riskDescLower) || findingMessages.has(risk.description.slice(0, 50).toLowerCase())) {
+        continue; // Skip duplicate
+      }
+      
       const severityIcon = risk.severity === 'high' ? '🔴' : risk.severity === 'medium' ? '🟡' : '🟢';
       comment += `${severityIcon} **${risk.severity.toUpperCase()}** [${risk.category}]\n`;
       comment += `> ${risk.description}\n`;
@@ -570,9 +590,25 @@ function generateV2PRComment(
     comment += `\n`;
   }
   
-  // Add minimal findings if there are critical issues
-  const criticalFindings = findings.filter(f => f.type === 'error' || f.type === 'warning').slice(0, 3);
-  if (criticalFindings.length > 0) {
+  // V3: Critical Findings - only show if verdict is NOT approved (avoid contradiction)
+  // Also deduplicate - don't show findings that are already in Key Risks
+  const criticalFindings = findings
+    .filter(f => f.type === 'error' || f.type === 'warning')
+    .filter(f => {
+      // Skip if already covered in key risks
+      const msgLower = f.message.toLowerCase();
+      for (const risk of keyRisks) {
+        if (risk.description.toLowerCase().includes(msgLower.slice(0, 30))) {
+          return false;
+        }
+      }
+      return true;
+    })
+    .slice(0, 3);
+  
+  // Only show Critical Findings section if verdict is changes_requested or commented
+  // (not approved) - ensures consistency between verdict and severity labels
+  if (criticalFindings.length > 0 && verdict.verdict !== 'approved') {
     comment += `### 🔍 Critical Findings\n`;
     for (const f of criticalFindings) {
       const icon = f.type === 'error' ? '❌' : '⚠️';
