@@ -210,6 +210,11 @@ function parseV2Response(aiResponse: string): V2ReviewOutput | null {
       ? Math.min(rawConfidence, 0.92)  // Cap at 0.92 for strong evidence
       : Math.min(rawConfidence, 0.82); // Cap at 0.82 for docs-only/mild cases
     
+    const normalizedConfidence = Math.max(0, Math.min(1, calibratedConfidence));
+    const finalConfidence = verdict === 'approved'
+      ? Math.min(normalizedConfidence, 0.82)
+      : normalizedConfidence;
+
     return {
       prIntent: parsed.prIntent,
       changeOverview: parsed.changeOverview,
@@ -221,7 +226,7 @@ function parseV2Response(aiResponse: string): V2ReviewOutput | null {
       },
       verdict: {
         verdict,
-        confidence: Math.max(0, Math.min(1, calibratedConfidence)),
+        confidence: finalConfidence,
         summary: parsed.verdict.summary || '',
       },
     };
@@ -352,7 +357,7 @@ export function generateDeterministicFallback(
   // Update verdict with calibrated confidence
   const finalVerdict = {
     verdict,
-    confidence: calibratedConfidence,
+    confidence: verdict === 'approved' ? Math.min(calibratedConfidence, 0.82) : calibratedConfidence,
     summary: verdictSummary,
   };
   

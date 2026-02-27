@@ -523,9 +523,61 @@ function generateCheckSummary(findings: ReviewFinding[], docType: DocTypeClassif
   return summary;
 }
 
+function normalizeTextForCompare(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/`/g, '')
+    .replace(/\[[^\]]+\]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isMoveReorderRisk(risk: { description?: string; evidence?: string }, semanticDiff: SemanticDiff): boolean {
+  const text = `${risk.description || ''} ${risk.evidence || ''}`.toLowerCase();
+  const hints = [
+    'section(s) removed',
+    'removed then re-added',
+    'reorganized',
+    'moved',
+    'renamed',
+    'semantic diff shows',
+  ];
+  const hasHint = hints.some(h => text.includes(h));
+  const diffSuggestsReorder = semanticDiff.stats.moved > 0 && semanticDiff.stats.added > 0 && semanticDiff.stats.removed > 0;
+  return hasHint && diffSuggestsReorder;
+}
+
+function isGenericSpeculativeRisk(risk: { category?: string; description?: string; evidence?: string }, findings: ReviewFinding[]): boolean {
+  const desc = (risk.description || '').toLowerCase();
+  const evidence = (risk.evidence || '').toLowerCase();
+
+  // Generic categories without concrete file/path evidence should be filtered.
+  const genericCategory = ['security', 'performance', 'testing', 'breaking'].includes((risk.category || '').toLowerCase());
+  const hasConcreteEvidence = /\b[a-z0-9_\-/]+\.(md|ts|js|tsx|jsx|json|yml|yaml)\b/i.test(evidence)
+    || /\bline\b/i.test(evidence)
+    || /\bsrc\//.test(evidence);
+
+  if (genericCategory && !hasConcreteEvidence) {
+    return true;
+  }
+
+  // If description does not map to any detected finding text, treat as speculative.
+  const normalizedDesc = normalizeTextForCompare(desc);
+  if (!normalizedDesc) return true;
+
+  const matchesFinding = findings.some(f => {
+    const msg = normalizeTextForCompare(f.message);
+    return msg.includes(normalizedDesc.slice(0, Math.min(40, normalizedDesc.length)))
+      || normalizedDesc.includes(msg.slice(0, Math.min(40, msg.length)));
+  });
+
+  return !matchesFinding && genericCategory;
+}
+
 /**
  * Generate v2 PR comment with structured sections
- * V3: Added verdict-label consistency and deduplication
+ * V3.1: stricter contradiction prevention + move/reorder suppression + dedupe
  */
 function generateV2PRComment(
   docType: DocTypeClassification,
@@ -533,7 +585,23 @@ function generateV2PRComment(
   findings: ReviewFinding[],
   v2Review: V2ReviewOutput
 ): string {
-  const { prIntent, changeOverview, keyRisks, checklist, verdict, prBodySuggestion } = v2Review;
+  const { prIntent, changeOverview, checklist, verdict, prBodySuggestion } = v2Review;
+
+  // Normalize risks before rendering.
+  const keyRisks = (v2Review.keyRisks || [])
+    .map(risk => {
+      if (isMoveReorderRisk(risk, semanticDiff)) {
+        return {
+          ...risk,
+          severity: 'low' as const,
+          category: 'docs',
+          description: 'Section changes look like a move/reorder rather than destructive removal.',
+          suggestion: 'Double-check headings and anchors, but treat as non-blocking documentation reorganization.',
+        };
+      }
+      return risk;
+    })
+    .filter(risk => !isGenericSpeculativeRisk(risk, findings));
   
   // V3: Verdict emoji and label
   const verdictEmoji = verdict.verdict === 'approved' ? '✅' : verdict.verdict === 'changes_requested' ? '❌' : '💬';
@@ -553,19 +621,18 @@ function generateV2PRComment(
   comment += `${changeOverview}\n\n`;
   comment += `**Diff Stats:** +${semanticDiff.stats.added} added, -${semanticDiff.stats.removed} removed, ~${semanticDiff.stats.modified} modified, »${semanticDiff.stats.moved} moved\n\n`;
   
-  // V3: Key Risks - deduplicate by not including items that are already covered in findings
-  // Build a set of finding messages to avoid duplication
-  const findingMessages = new Set(findings.map(f => f.message.toLowerCase()));
-  
-  if (keyRisks.length > 0) {
+  // Deduplicate risks by normalized description.
+  const seenRiskDescriptions = new Set<string>();
+  const renderedRisks = keyRisks.filter(risk => {
+    const normalized = normalizeTextForCompare(risk.description || '');
+    if (!normalized || seenRiskDescriptions.has(normalized)) return false;
+    seenRiskDescriptions.add(normalized);
+    return true;
+  });
+
+  if (renderedRisks.length > 0) {
     comment += `### ⚠️ Key Risks\n`;
-    for (const risk of keyRisks.slice(0, 5)) {
-      // Skip if this risk is already covered by findings
-      const riskDescLower = risk.description.toLowerCase();
-      if (findingMessages.has(riskDescLower) || findingMessages.has(risk.description.slice(0, 50).toLowerCase())) {
-        continue; // Skip duplicate
-      }
-      
+    for (const risk of renderedRisks.slice(0, 5)) {
       const severityIcon = risk.severity === 'high' ? '🔴' : risk.severity === 'medium' ? '🟡' : '🟢';
       comment += `${severityIcon} **${risk.severity.toUpperCase()}** [${risk.category}]\n`;
       comment += `> ${risk.description}\n`;
@@ -590,29 +657,26 @@ function generateV2PRComment(
     comment += `\n`;
   }
   
-  // V3: Critical Findings - only show if verdict is NOT approved (avoid contradiction)
-  // Also deduplicate - don't show findings that are already in Key Risks
+  // Critical findings are only shown for blocking verdicts to avoid mixed signals.
   const criticalFindings = findings
-    .filter(f => f.type === 'error' || f.type === 'warning')
+    .filter(f => f.type === 'error')
     .filter(f => {
-      // Skip if already covered in key risks
-      const msgLower = f.message.toLowerCase();
-      for (const risk of keyRisks) {
-        if (risk.description.toLowerCase().includes(msgLower.slice(0, 30))) {
+      const normalizedFinding = normalizeTextForCompare(f.message);
+      if (!normalizedFinding) return false;
+      for (const risk of renderedRisks) {
+        const normalizedRisk = normalizeTextForCompare(risk.description || '');
+        if (normalizedRisk && (normalizedRisk.includes(normalizedFinding) || normalizedFinding.includes(normalizedRisk))) {
           return false;
         }
       }
       return true;
     })
     .slice(0, 3);
-  
-  // Only show Critical Findings section if verdict is changes_requested or commented
-  // (not approved) - ensures consistency between verdict and severity labels
-  if (criticalFindings.length > 0 && verdict.verdict !== 'approved') {
+
+  if (criticalFindings.length > 0 && verdict.verdict === 'changes_requested') {
     comment += `### 🔍 Critical Findings\n`;
     for (const f of criticalFindings) {
-      const icon = f.type === 'error' ? '❌' : '⚠️';
-      comment += `${icon} ${f.file ? `[${f.file}] ` : ''}${f.message}\n`;
+      comment += `❌ ${f.file ? `[${f.file}] ` : ''}${f.message}\n`;
     }
     comment += `\n`;
   }
