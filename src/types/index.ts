@@ -179,6 +179,10 @@ export interface PRBodySuggestion {
     heading: string;
     content: string;
   }>;
+  updates?: Array<{
+    section: string;
+    content: string;
+  }>;
 }
 
 export interface V2ReviewOutput {

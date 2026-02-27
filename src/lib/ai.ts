@@ -28,6 +28,29 @@ interface CodeFileInfo {
 }
 
 /**
+ * Extract high-signal hunks from code patches (first 3-5 most relevant)
+ */
+function extractHighSignalHunks(codeFiles: CodeFileInfo[]): string {
+  if (!codeFiles || codeFiles.length === 0) {
+    return 'No code changes';
+  }
+
+  // Prioritize files with more changes and files that look important
+  const sortedFiles = [...codeFiles]
+    .filter(f => f.patch)
+    .sort((a, b) => (b.additions + b.deletions) - (a.additions + a.deletions))
+    .slice(0, 4);
+
+  const hunks: string[] = [];
+  for (const file of sortedFiles) {
+    const lines = file.patch!.split('\n').slice(0, 30); // First 30 lines of patch
+    hunks.push(`\`${file.filename}\` (+${file.additions}/-${file.deletions}):\n\`\`\`diff\n${lines.join('\n')}\n\`\`\``);
+  }
+
+  return hunks.join('\n\n') || 'No significant code hunks';
+}
+
+/**
  * Generate a rich context prompt for v2 PR review
  */
 function buildRichPrompt(
@@ -37,56 +60,66 @@ function buildRichPrompt(
   findings: ReviewFinding[],
   codeFiles: CodeFileInfo[]
 ): string {
-  const { title, body, author, baseRef, headRef } = prContext;
+  const { title, body, author, baseRef, headRef, baseSha, headSha } = prContext;
   
-  // Build files summary
-  const filesChanged = [...codeFiles];
-  const filesSummary = filesChanged.length > 0 
-    ? filesChanged.map(f => `${f.filename}: +${f.additions}/-${f.deletions}`).join('\n')
+  // Build files summary (focused on docs + code split)
+  const docFiles = codeFiles.filter(f => f.filename.endsWith('.md') || f.filename.endsWith('.mdx'));
+  const codeFileCount = codeFiles.length - docFiles.length;
+  const filesSummary = codeFiles.length > 0
+    ? codeFiles.map(f => `${f.filename}: +${f.additions}/-${f.deletions}`).join('\n')
     : 'No code files changed';
   
   // Build semantic diff summary
   const diffStats = semanticDiff.stats;
-  const sectionChanges = semanticDiff.sections.slice(0, 10).map((s: SectionChange) => {
+  const sectionChanges = semanticDiff.sections.slice(0, 8).map((s: SectionChange) => {
     if (s.type === 'added') return `+ ${s.newHeading} (added)`;
     if (s.type === 'removed') return `- ${s.oldHeading} (removed)`;
     if (s.type === 'modified') return `~ ${s.newHeading} (modified)`;
     return `» ${s.newHeading} (moved)`;
   }).join('\n');
   
-  // Build high-signal findings (errors and warnings, max 10)
+  // Build high-signal findings (errors and warnings only, max 8)
   const highSignalFindings = findings
     .filter(f => f.type === 'error' || f.type === 'warning')
-    .slice(0, 10)
+    .slice(0, 8)
     .map(f => `[${f.type.toUpperCase()}] ${f.file || 'general'}: ${f.message}`)
     .join('\n');
+
+  // Extract curated code hunks
+  const codeHunks = extractHighSignalHunks(codeFiles);
+  
+  // Build PR refs summary
+  const prRefs = `base: \`${baseRef}\` (${baseSha.slice(0, 7)}) → head: \`${headRef}\` (${headSha.slice(0, 7)})`;
   
   // Build the rich prompt
   const prompt = `You are an expert code reviewer analyzing a GitHub Pull Request.
 
-## PR Context
+## PR Metadata
 - **Title:** ${title}
-- **Description:** ${body || '(no description)'}
 - **Author:** ${author}
-- **Base Branch:** ${baseRef}
-- **Head Branch:** ${headRef}
-- **Document Type:** ${docType.type} (${Math.round(docType.confidence * 100)}% confidence)
+- **Refs:** ${prRefs}
 
-## Changes Summary
-- Files Changed: ${filesChanged.length}
-- Files: ${filesSummary}
+## PR Description
+${body || '(no description provided)'}
+
+## Document Classification
+- **Type:** ${docType.type} (${Math.round(docType.confidence * 100)}% confidence)
+- **Indicators:** ${docType.indicators?.slice(0, 3).join(', ') || 'none'}
+
+## Changed Files (${codeFiles.length} total, ${codeFileCount} code files)
+${filesSummary}
 
 ## Semantic Diff Stats
-- Sections Added: ${diffStats.added}
-- Sections Removed: ${diffStats.removed}
-- Sections Modified: ${diffStats.modified}
-- Sections Moved: ${diffStats.moved}
+- Sections: +${diffStats.added} added, -${diffStats.removed} removed, ~${diffStats.modified} modified, »${diffStats.moved} moved
 
-## Key Section Changes
+## Key Section Changes (documentation)
 ${sectionChanges || 'No section-level changes detected'}
 
-## High-Signal Findings (Errors & Warnings)
+## High-Signal Findings (Errors & Warnings only)
 ${highSignalFindings || 'No critical issues found'}
+
+## Code Changes (curated hunks)
+${codeHunks}
 
 Based on this context, generate a structured PR review with the following JSON format:
 
@@ -115,6 +148,12 @@ Based on this context, generate a structured PR review with the following JSON f
         "heading": "Section heading",
         "content": "Section content"
       }
+    ],
+    "updates": [
+      {
+        "section": "Section name to add/update",
+        "content": "What content should be added or modified"
+      }
     ]
   },
   "verdict": {
@@ -136,12 +175,31 @@ function parseV2Response(aiResponse: string): V2ReviewOutput | null {
   try {
     // Try to extract JSON from response
     const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
+    if (!jsonMatch) {
+      console.error('No JSON found in AI response');
+      return null;
+    }
     
     const parsed = JSON.parse(jsonMatch[0]);
     
     // Validate required fields
     if (!parsed.prIntent || !parsed.changeOverview || !parsed.verdict) {
+      console.error('Missing required fields in parsed response');
+      return null;
+    }
+    
+    // Validate verdict type
+    const validVerdicts = ['approved', 'changes_requested', 'commented'];
+    const verdict = parsed.verdict.verdict || 'commented';
+    if (!validVerdicts.includes(verdict)) {
+      console.error('Invalid verdict:', verdict);
+      return null;
+    }
+    
+    // Validate confidence is a number between 0 and 1
+    const confidence = parsed.verdict.confidence ?? 0.5;
+    if (typeof confidence !== 'number' || confidence < 0 || confidence > 1) {
+      console.error('Invalid confidence:', confidence);
       return null;
     }
     
@@ -150,10 +208,13 @@ function parseV2Response(aiResponse: string): V2ReviewOutput | null {
       changeOverview: parsed.changeOverview,
       keyRisks: parsed.keyRisks || [],
       checklist: parsed.checklist || [],
-      prBodySuggestion: parsed.prBodySuggestion || { sections: [] },
+      prBodySuggestion: {
+        sections: parsed.prBodySuggestion?.sections || [],
+        updates: parsed.prBodySuggestion?.updates || [],
+      },
       verdict: {
-        verdict: parsed.verdict.verdict || 'commented',
-        confidence: parsed.verdict.confidence || 0.5,
+        verdict,
+        confidence: Math.max(0, Math.min(1, confidence)),
         summary: parsed.verdict.summary || '',
       },
     };

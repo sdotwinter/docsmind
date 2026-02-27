@@ -11,6 +11,36 @@ interface GitHubClient {
   installationId: number;
 }
 
+/**
+ * Filter out low-value findings to reduce noise
+ */
+function filterHighSignalFindings(findings: ReviewFinding[]): ReviewFinding[] {
+  const lowValuePatterns = [
+    /^Code changes:/,
+    /^New document:/,
+    /^Document has \d+ table/,
+    /^Document has \d+ code block/,
+    /^Table count changed/,
+    /^\+[0-9]+ added/,
+    /^Process has been tested/,
+    /^SOP includes clear step-by-step/,
+    /^README includes/,
+  ];
+  
+  return findings.filter(f => {
+    // Keep all errors and warnings
+    if (f.type === 'error' || f.type === 'warning') return true;
+    
+    // Filter out low-value info items
+    for (const pattern of lowValuePatterns) {
+      if (pattern.test(f.message)) return false;
+    }
+    
+    // Keep info items with actual content-related issues
+    return f.category !== 'content' || f.message.length > 50;
+  }).slice(0, 20); // Max 20 findings to avoid spam
+}
+
 export async function createGitHubClient(payload: WebhookPayload): Promise<GitHubClient> {
   // This would use the GitHub App's private key
   const appId = process.env.GITHUB_APP_ID || '';
@@ -264,11 +294,13 @@ export async function handlePullRequest(
     }
   }
   
-  // Post results to GitHub
+  // Post results to GitHub (filter low-value findings first)
+  const filteredFindings = filterHighSignalFindings(allFindings);
+  
   await postReviewResults(github, repository, pull_request, {
     docType: docType || { type: 'other', confidence: 0, indicators: [] },
     semanticDiff,
-    findings: allFindings,
+    findings: filteredFindings,
     summary,
     aiSummary,
     prDescription,
@@ -281,7 +313,7 @@ export async function handlePullRequest(
     pullRequest: pull_request.number,
     docType: docType || { type: 'other', confidence: 0, indicators: [] },
     semanticDiff,
-    findings: allFindings,
+    findings: filteredFindings,
     summary,
     aiSummary,
     prDescription,
@@ -490,7 +522,7 @@ function generateV2PRComment(
   findings: ReviewFinding[],
   v2Review: V2ReviewOutput
 ): string {
-  const { prIntent, changeOverview, keyRisks, checklist, verdict } = v2Review;
+  const { prIntent, changeOverview, keyRisks, checklist, verdict, prBodySuggestion } = v2Review;
   
   // Verdict emoji and label
   const verdictEmoji = verdict.verdict === 'approved' ? '✅' : verdict.verdict === 'changes_requested' ? '❌' : '💬';
@@ -538,13 +570,33 @@ function generateV2PRComment(
     comment += `\n`;
   }
   
-  // Add minimal findings if no v2 review or there are critical issues
+  // Add minimal findings if there are critical issues
   const criticalFindings = findings.filter(f => f.type === 'error' || f.type === 'warning').slice(0, 3);
-  if (criticalFindings.length > 0 && !v2Review) {
+  if (criticalFindings.length > 0) {
     comment += `### 🔍 Critical Findings\n`;
     for (const f of criticalFindings) {
       const icon = f.type === 'error' ? '❌' : '⚠️';
       comment += `${icon} ${f.file ? `[${f.file}] ` : ''}${f.message}\n`;
+    }
+    comment += `\n`;
+  }
+  
+  // PR Body Suggestions (if AI provided updates)
+  const prUpdates = prBodySuggestion?.updates || [];
+  const prSections = prBodySuggestion?.sections || [];
+  if (prUpdates.length > 0 || prSections.length > 0) {
+    comment += `### 📋 Suggested PR Body Updates\n`;
+    if (prSections.length > 0) {
+      comment += `**New Sections:**\n`;
+      for (const section of prSections.slice(0, 3)) {
+        comment += `- **${section.heading}**: ${section.content.slice(0, 100)}${section.content.length > 100 ? '...' : ''}\n`;
+      }
+    }
+    if (prUpdates.length > 0) {
+      comment += `\n**Updates:**\n`;
+      for (const update of prUpdates.slice(0, 3)) {
+        comment += `- **${update.section}**: ${update.content.slice(0, 100)}${update.content.length > 100 ? '...' : ''}\n`;
+      }
     }
     comment += `\n`;
   }
