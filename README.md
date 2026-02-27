@@ -6,11 +6,13 @@ Automated PR reviews for your documentation. Get instant feedback on markdown ch
 
 ## Features
 
+- **Docs-First, Code-Aware Reviews** - Optimized for Markdown/documentation PRs, with code-diff context considered when relevant
 - **Semantic Diff** - Understands document structure, not just text changes
 - **Smart Classification** - Identifies doc types: README, SOP, ADR, Runbook, Pricing, API, Contributing
 - **Contextual Checklists** - Review items based on document type and PR intent
 - **Link Validation** - Catches broken internal links
-- **GitHub Integration** - Checks + comments with verdict and confidence on every PR
+- **GitHub Integration** - Posts checks + comments with clear verdicts and confidence labels
+- **Deterministic Fallback** - If AI output fails/parsing fails, DiffShield still returns a structured review
 
 ## Quick Start
 
@@ -41,21 +43,30 @@ Make changes to any `.md` file and open a PR. DiffShield will automatically:
 | API | Endpoints, authentication |
 | Contributing | PR guidelines, development setup |
 
+## Confidence & Verdicts
+
+DiffShield reports two separate confidence values:
+
+- **Verdict confidence**: confidence in the merge recommendation (`approved`, `commented`, `changes_requested`)
+- **Doc-type confidence**: confidence in the document classification (e.g., README vs API)
+
+Verdicts map to GitHub check conclusions:
+
+- `approved` → ✅ success
+- `commented` → 💬 neutral
+- `changes_requested` → ❌ failure
+
+Guardrail: low-risk/non-blocking feedback should not hard-fail checks.
+
 ## Example Review
 
-```
-📄 DiffShield Review
+```text
+🛡️ DiffShield Review
+✅ APPROVED (80% verdict confidence)
 
-Document Type: README (85% confidence)
+...review content...
 
-Changes Summary
-+3 sections, -1 removed, 2 modified
-
-Findings
-✅ Verify installation steps work
-✅ Check API examples are correct  
-✅ Review 3 new section(s)
-⚠️ Verify 1 removed section(s) are intentional
+Document Type: README (78% doc-type confidence)
 ```
 
 
