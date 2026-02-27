@@ -511,11 +511,11 @@ function generateCheckSummary(findings: ReviewFinding[], docType: DocTypeClassif
   const warnings = findings.filter(f => f.type === 'warning').length;
   const infos = findings.filter(f => f.type === 'info').length;
   
-  let summary = `Doc Type: ${docType.type} (${Math.round(docType.confidence * 100)}% confidence)`;
+  let summary = `Doc Type: ${docType.type} (${Math.round(docType.confidence * 100)}% doc-type confidence)`;
   
   if (v2Review?.verdict) {
     const v = v2Review.verdict;
-    summary += `\nVerdict: ${v.verdict} (${Math.round(v.confidence * 100)}% confidence)\n${v.summary}`;
+    summary += `\nVerdict: ${v.verdict} (${Math.round(v.confidence * 100)}% verdict confidence)\n${v.summary}`;
   }
   
   summary += `\n\n${errors} error(s), ${warnings} warning(s), ${infos} info(s)`;
@@ -610,7 +610,7 @@ function generateV2PRComment(
   let comment = `## 🛡️ DiffShield Review\n\n`;
   
   // Verdict header
-  comment += `### ${verdictEmoji} **${verdictLabel}** (${Math.round(verdict.confidence * 100)}% confidence)\n`;
+  comment += `### ${verdictEmoji} **${verdictLabel}** (${Math.round(verdict.confidence * 100)}% verdict confidence)\n`;
   comment += `${verdict.summary}\n\n---\n\n`;
   
   // PR Intent
@@ -702,7 +702,7 @@ function generateV2PRComment(
   }
   
   // Doc type footer
-  comment += `---\n*Doc Type: ${docType.type.toUpperCase()} (${Math.round(docType.confidence * 100)}% confidence) • DiffShield v2*`;
+  comment += `---\n*Document Type: ${docType.type.toUpperCase()} (${Math.round(docType.confidence * 100)}% doc-type confidence) • DiffShield v2*`;
   
   return comment;
 }

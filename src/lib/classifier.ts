@@ -101,26 +101,43 @@ export function classifyDocument(doc: DocDocument): DocTypeClassification {
     scores['sop'] = (scores['sop'] || 0) + doc.codeBlocks.length * 0.2;
     scores['api'] = (scores['api'] || 0) + doc.codeBlocks.length * 0.4;
   }
-  
-  // Find highest score
-  let maxType = 'other';
-  let maxScore = 0;
-  
-  for (const [docType, score] of Object.entries(scores)) {
-    if (score > maxScore) {
-      maxScore = score;
-      maxType = docType;
-    }
+
+  // Path/title priors: boost obvious file types for more intuitive confidence.
+  const normalizedPath = (doc.path || '').toLowerCase();
+  const normalizedTitle = title.toLowerCase();
+
+  if (normalizedPath.endsWith('readme.md') || normalizedPath.endsWith('readme.mdx')) {
+    scores['readme'] = (scores['readme'] || 0) + 6;
+    indicators.push('Path prior: README filename');
   }
-  
-  // Normalize confidence
+  if (normalizedPath.endsWith('contributing.md') || normalizedPath.endsWith('contributing.mdx')) {
+    scores['contrib'] = (scores['contrib'] || 0) + 5;
+    indicators.push('Path prior: CONTRIBUTING filename');
+  }
+  if (normalizedPath.includes('changelog')) {
+    scores['changelog'] = (scores['changelog'] || 0) + 5;
+    indicators.push('Path prior: changelog filename');
+  }
+  if (normalizedTitle === 'readme') {
+    scores['readme'] = (scores['readme'] || 0) + 2;
+    indicators.push('Title prior: README heading');
+  }
+
+  // Find top two scores
+  const ranked = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+  const [topType, topScore = 0] = ranked[0] || ['other', 0];
+  const secondScore = ranked[1]?.[1] || 0;
+
+  // Normalize confidence with margin bonus vs runner-up.
   const totalScore = Object.values(scores).reduce((a, b) => a + b, 0);
-  const confidence = totalScore > 0 ? Math.min(maxScore / totalScore + 0.3, 1) : 0;
+  const baseConfidence = totalScore > 0 ? topScore / totalScore : 0;
+  const margin = topScore > 0 ? (topScore - secondScore) / topScore : 0;
+  const confidence = Math.max(0, Math.min(1, 0.35 + baseConfidence * 0.45 + margin * 0.2));
   
   return {
-    type: maxType as DocTypeClassification['type'],
+    type: topType as DocTypeClassification['type'],
     confidence,
-    indicators: indicators.slice(0, 5),
+    indicators: indicators.slice(0, 6),
   };
 }
 

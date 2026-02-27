@@ -67,6 +67,7 @@ DiffShield comments should help reviewers decide quickly:
 - Highlight only high-impact risks with evidence
 - Provide clear, actionable checklist items
 - Keep output concise and decision-oriented
+- Prefer deterministic fallback when AI parsing fails
 
 ## Configuration
 
